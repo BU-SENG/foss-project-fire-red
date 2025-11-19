@@ -1,0 +1,1808 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Admin Dashboard - CampusConnect</title>
+    <link rel="icon" href="./assets/cc-logo.png" type="image/png" />
+    <!-- React CDNs -->
+    <script
+      crossorigin
+      src="https://unpkg.com/react@18/umd/react.development.js"
+    ></script>
+    <script
+      crossorigin
+      src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"
+    ></script>
+    <!-- Babel for JSX transformation -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Font Awesome -->
+    <link
+      rel="stylesheet"
+      href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css"
+    />
+    <style>
+      :root {
+        --primary-color: #a7c957;
+        --primary-dark: #95b44a;
+        --secondary-color: #a3b18a;
+        --background-color: #d8f3dc;
+        --white: #ffffff;
+      }
+
+      .bg-primary {
+        background-color: var(--primary-color);
+      }
+
+      .bg-primary-dark {
+        background-color: var(--primary-dark);
+      }
+
+      .bg-background {
+        background-color: var(--background-color);
+      }
+
+      .text-primary {
+        color: var(--primary-color);
+      }
+
+      .border-primary {
+        border-color: var(--primary-color);
+      }
+
+      .btn-primary {
+        background-color: var(--primary-color);
+        color: #2d3748;
+        transition: all 0.2s ease;
+      }
+
+      .btn-primary:hover {
+        background-color: var(--primary-dark);
+        transform: translateY(-1px);
+      }
+
+      /* Custom scrollbar */
+      .scrollbar-thin::-webkit-scrollbar {
+        width: 4px;
+      }
+
+      .scrollbar-thin::-webkit-scrollbar-track {
+        background: #f1f1f1;
+        border-radius: 10px;
+      }
+
+      .scrollbar-thin::-webkit-scrollbar-thumb {
+        background: #c1c1c1;
+        border-radius: 10px;
+      }
+
+      /* Loading spinner */
+      .loading-spinner {
+        border: 4px solid #f3f3f3;
+        border-top: 4px solid var(--primary-color);
+        border-radius: 50%;
+        width: 40px;
+        height: 40px;
+        animation: spin 2s linear infinite;
+      }
+
+      @keyframes spin {
+        0% {
+          transform: rotate(0deg);
+        }
+        100% {
+          transform: rotate(360deg);
+        }
+      }
+
+      /* Mobile optimizations */
+      @media (max-width: 768px) {
+        .mobile-optimized-table {
+          font-size: 0.875rem;
+        }
+
+        .mobile-action-buttons {
+          display: flex;
+          flex-direction: column;
+          gap: 0.25rem;
+        }
+      }
+    </style>
+  </head>
+
+  <body class="bg-gray-50">
+    <div id="root"></div>
+
+    <script type="text/babel">
+      const { useState, useEffect, useRef, useCallback } = React;
+
+      const AdminDashboard = () => {
+        const API_BASE = "https://campusconnect-server-idcq.onrender.com";
+        const [currentView, setCurrentView] = useState("dashboard");
+        const [user, setUser] = useState(null);
+        const [messages, setMessages] = useState([]);
+        const [loading, setLoading] = useState(true);
+        const [error, setError] = useState(null);
+        const [stats, setStats] = useState({
+          totalMessages: 0,
+          unreadMessages: 0,
+          responseRate: 0,
+          avgResponseTime: null,
+        });
+        const [analyticsFocus, setAnalyticsFocus] = useState(null);
+
+        // Undo functionality state
+        const [deletedMessage, setDeletedMessage] = useState(null);
+        const [showUndo, setShowUndo] = useState(false);
+        const [undoTimeout, setUndoTimeout] = useState(null);
+        const [actionLoading, setActionLoading] = useState({});
+
+        /* Authentication & user initialization */
+        useEffect(() => {
+          const token = localStorage.getItem("cc_token");
+          if (!token) {
+            window.location.href = "admin-login.html";
+            return;
+          }
+
+          const adminData = localStorage.getItem("adminUser");
+          if (adminData) {
+            try {
+              setUser(JSON.parse(adminData));
+            } catch (e) {
+              setUser({ name: "Admin", email: "admin@campusconnect.edu" });
+            }
+          } else {
+            setUser({ name: "Admin", email: "admin@campusconnect.edu" });
+          }
+        }, []);
+
+        /* Auto-refresh messages from API with polling */
+        useEffect(() => {
+          const token = localStorage.getItem("cc_token");
+          let isMounted = true;
+          const pollIntervalMs = 15000;
+
+          const normalize = (m) => ({
+            ...m,
+            timestamp: m.timestamp ? new Date(m.timestamp) : new Date(),
+          });
+
+          const fetchMessages = async () => {
+            try {
+              setError(null);
+              const headers = { "Content-Type": "application/json" };
+              if (token) {
+                headers["Authorization"] = `Bearer ${token}`;
+              }
+
+              const res = await fetch(`${API_BASE}/api/messages`, { headers });
+
+              if (res.status === 401) {
+                localStorage.removeItem("cc_token");
+                window.location.href = "admin-login.html";
+                return;
+              }
+
+              if (!res.ok) {
+                throw new Error(`Network response not ok: ${res.status}`);
+              }
+
+              const data = await res.json();
+              if (!isMounted) return;
+
+              const apiMsgs = Array.isArray(data) ? data.map(normalize) : [];
+              setMessages(apiMsgs);
+            } catch (err) {
+              console.error("Failed to fetch messages from API:", err);
+              setError(
+                "Failed to load messages. Please check your connection."
+              );
+            } finally {
+              setLoading(false);
+            }
+          };
+
+          fetchMessages();
+          const iv = setInterval(fetchMessages, pollIntervalMs);
+
+          return () => {
+            isMounted = false;
+            clearInterval(iv);
+          };
+        }, []);
+
+        /* Auto-clear errors after 5 seconds */
+        useEffect(() => {
+          if (error) {
+            const timer = setTimeout(() => {
+              setError(null);
+            }, 5000);
+            return () => clearTimeout(timer);
+          }
+        }, [error]);
+
+        /* Compute dashboard statistics */
+        useEffect(() => {
+          const total = messages.length;
+          const unread = messages.filter(
+            (m) => (m.status || "").toLowerCase() === "new"
+          ).length;
+
+          const respondedCount = messages.filter((m) => {
+            const s = (m.status || "").toLowerCase();
+            return s === "reviewed" || s === "resolved" || s === "responded";
+          }).length;
+
+          const responseRate =
+            total > 0 ? Math.round((respondedCount / total) * 100) : 0;
+
+          const responseTimes = messages
+            .map((m) => {
+              const created = m.timestamp ? new Date(m.timestamp) : null;
+              const responded = m.respondedAt
+                ? new Date(m.respondedAt)
+                : m.responseTimestamp
+                ? new Date(m.responseTimestamp)
+                : null;
+              if (created && responded) {
+                return (responded - created) / (1000 * 60 * 60 * 24);
+              }
+              return null;
+            })
+            .filter((x) => x !== null);
+
+          const avgResponseTime =
+            responseTimes.length > 0
+              ? Number(
+                  (
+                    responseTimes.reduce((a, b) => a + b, 0) /
+                    responseTimes.length
+                  ).toFixed(1)
+                )
+              : null;
+
+          setStats({
+            totalMessages: total,
+            unreadMessages: unread,
+            responseRate,
+            avgResponseTime,
+          });
+        }, [messages]);
+
+        /* Helper functions for styling */
+        const getCategoryColor = (category) => {
+          const cat = (category || "").toLowerCase();
+          switch (cat) {
+            case "suggestion":
+              return "bg-blue-100 text-blue-800";
+            case "complaint":
+              return "bg-red-100 text-red-800";
+            case "appreciation":
+              return "bg-green-100 text-green-800";
+            case "question":
+              return "bg-purple-100 text-purple-800";
+            default:
+              return "bg-gray-100 text-gray-800";
+          }
+        };
+
+        const getStatusColor = (status) => {
+          const stat = (status || "").toLowerCase();
+          switch (stat) {
+            case "new":
+              return "bg-red-100 text-red-800";
+            case "reviewed":
+              return "bg-yellow-100 text-yellow-800";
+            case "resolved":
+              return "bg-green-100 text-green-800";
+            case "responded":
+              return "bg-blue-100 text-blue-800";
+            default:
+              return "bg-gray-100 text-gray-800";
+          }
+        };
+
+        const computeSentimentPercent = (msgs) => {
+          const positiveKeywords = [
+            "good",
+            "great",
+            "excellent",
+            "awesome",
+            "thanks",
+            "thank you",
+            "helpful",
+            "love",
+            "amazing",
+            "perfect",
+            "wonderful",
+          ];
+          const positiveCount = msgs.filter((msg) =>
+            positiveKeywords.some((keyword) =>
+              msg.text.toLowerCase().includes(keyword)
+            )
+          ).length;
+          return msgs.length > 0
+            ? Math.round((positiveCount / msgs.length) * 100)
+            : 0;
+        };
+
+        const getTopCategory = (msgs) => {
+          const categories = {};
+          msgs.forEach((msg) => {
+            const cat = msg.category || "unknown";
+            categories[cat] = (categories[cat] || 0) + 1;
+          });
+
+          if (Object.keys(categories).length === 0) return "None";
+
+          const topCategory = Object.keys(categories).reduce((a, b) =>
+            categories[a] > categories[b] ? a : b
+          );
+          return topCategory === "unknown" ? "None" : topCategory;
+        };
+
+        /* Period comparison helpers */
+        const countInRange = (msgs, start, end, predicate) => {
+          return msgs.reduce((acc, m) => {
+            const ts = m.timestamp ? new Date(m.timestamp) : null;
+            if (!ts) return acc;
+            if (ts >= start && ts < end) {
+              if (!predicate) return acc + 1;
+              return predicate(m) ? acc + 1 : acc;
+            }
+            return acc;
+          }, 0);
+        };
+
+        const percentChange = (prev, curr) => {
+          if (prev === 0) {
+            return null;
+          }
+          const change = ((curr - prev) / prev) * 100;
+          return Number(change.toFixed(1));
+        };
+
+        const startOfMonth = (d) => new Date(d.getFullYear(), d.getMonth(), 1);
+        const startOfPrevMonth = (d) => {
+          const s = startOfMonth(d);
+          return new Date(s.getFullYear(), s.getMonth() - 1, 1);
+        };
+
+        const startOfWeek = (d) => {
+          const day = d.getDay();
+          const diff = (day + 6) % 7;
+          const s = new Date(d);
+          s.setHours(0, 0, 0, 0);
+          s.setDate(d.getDate() - diff);
+          return s;
+        };
+
+        const startOfPrevWeek = (d) => {
+          const s = startOfWeek(d);
+          const prev = new Date(s);
+          prev.setDate(s.getDate() - 7);
+          return prev;
+        };
+
+        /* Compute month-over-month total feedback change */
+        const computeTotalMonthComparison = (msgs) => {
+          const now = new Date();
+          const startCurr = startOfMonth(now);
+          const startPrev = startOfPrevMonth(now);
+          const endPrev = startCurr;
+          const curr = countInRange(
+            msgs,
+            startCurr,
+            new Date(now.getFullYear(), now.getMonth() + 1, 1)
+          );
+          const prev = countInRange(msgs, startPrev, endPrev);
+          return { prev, curr, change: percentChange(prev, curr) };
+        };
+
+        /* Compute week-over-week unread feedback change */
+        const computeUnreadWeekComparison = (msgs) => {
+          const now = new Date();
+          const startCurr = startOfWeek(now);
+          const startPrev = startOfPrevWeek(now);
+          const endPrev = startCurr;
+          const curr = countInRange(
+            msgs,
+            startCurr,
+            new Date(startCurr.getTime() + 7 * 24 * 60 * 60 * 1000),
+            (m) => (m.status || "").toLowerCase() === "new"
+          );
+          const prev = countInRange(
+            msgs,
+            startPrev,
+            endPrev,
+            (m) => (m.status || "").toLowerCase() === "new"
+          );
+          return { prev, curr, change: percentChange(prev, curr) };
+        };
+
+        /* Calculate average response time in date range */
+        const avgResponseTimeInRange = (msgs, start, end) => {
+          const times = [];
+          for (const m of msgs) {
+            const responded = m.respondedAt
+              ? new Date(m.respondedAt)
+              : m.responseTimestamp
+              ? new Date(m.responseTimestamp)
+              : null;
+            const created = m.timestamp ? new Date(m.timestamp) : null;
+            if (responded && created && responded >= start && responded < end) {
+              times.push((responded - created) / (1000 * 60 * 60 * 24));
+            }
+          }
+          if (times.length === 0) return { avg: null, count: 0 };
+          const avg = times.reduce((a, b) => a + b, 0) / times.length;
+          return { avg: Number(avg.toFixed(1)), count: times.length };
+        };
+
+        /* Compute week-over-week average response time change */
+        const computeAvgResponseTimeWeekComparison = (msgs) => {
+          const now = new Date();
+          const startCurr = startOfWeek(now);
+          const startPrev = startOfPrevWeek(now);
+          const endPrev = startCurr;
+          const curr = avgResponseTimeInRange(
+            msgs,
+            startCurr,
+            new Date(startCurr.getTime() + 7 * 24 * 60 * 60 * 1000)
+          );
+          const prev = avgResponseTimeInRange(msgs, startPrev, endPrev);
+          if (prev.avg === null || curr.avg === null)
+            return { prev: prev.avg, curr: curr.avg, change: null };
+          return {
+            prev: prev.avg,
+            curr: curr.avg,
+            change: percentChange(prev.avg, curr.avg),
+          };
+        };
+
+        const totalMonthComp = computeTotalMonthComparison(messages);
+        const unreadWeekComp = computeUnreadWeekComparison(messages);
+        const avgRespWeekComp = computeAvgResponseTimeWeekComparison(messages);
+
+        /* Format percent change display with colors and tooltips */
+        const formatChangeWithCounts = (comp) => {
+          if (!comp)
+            return {
+              text: "—",
+              icon: "fas fa-minus",
+              colorClass: "text-gray-600",
+              tooltip: "",
+            };
+          const { prev, curr, change } = comp;
+          if (change === null) {
+            return {
+              text: "—",
+              icon: "fas fa-minus",
+              colorClass: "text-gray-600",
+              tooltip: `current: ${curr} • previous: ${prev}`,
+            };
+          }
+          if (change > 0)
+            return {
+              text: `+${change}%`,
+              icon: "fas fa-arrow-up",
+              colorClass: "text-green-600",
+              tooltip: `current: ${curr} • previous: ${prev}`,
+            };
+          if (change < 0)
+            return {
+              text: `${change}%`,
+              icon: "fas fa-arrow-down",
+              colorClass: "text-red-600",
+              tooltip: `current: ${curr} • previous: ${prev}`,
+            };
+          return {
+            text: "0%",
+            icon: "fas fa-minus",
+            colorClass: "text-gray-600",
+            tooltip: `current: ${curr} • previous: ${prev}`,
+          };
+        };
+
+        const totalMonthDisplay = formatChangeWithCounts(totalMonthComp);
+        const unreadWeekDisplay = formatChangeWithCounts(unreadWeekComp);
+        const avgRespWeekDisplay = formatChangeWithCounts(avgRespWeekComp);
+
+        const handleLogout = () => {
+          localStorage.removeItem("cc_token");
+          localStorage.removeItem("adminUser");
+          window.location.href = "admin-login.html";
+        };
+
+        /* Format date for display */
+        const formatDate = (dateString) => {
+          return new Date(dateString).toLocaleDateString("en-US", {
+            year: "numeric",
+            month: "short",
+            day: "numeric",
+          });
+        };
+
+        /* API functions for message operations - OPTIMIZED WITH UNDO */
+        const updateMessageStatus = async (id, newStatus) => {
+          setActionLoading((prev) => ({ ...prev, [id]: true }));
+
+          try {
+            const token = localStorage.getItem("cc_token");
+
+            // Optimistic update
+            const previousMessages = [...messages];
+            setMessages((prev) =>
+              prev.map((msg) =>
+                msg.id === id || msg._id === id
+                  ? { ...msg, status: newStatus }
+                  : msg
+              )
+            );
+
+            const response = await fetch(`${API_BASE}/api/messages/${id}`, {
+              method: "PUT",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${token}`,
+              },
+              body: JSON.stringify({ status: newStatus }),
+            });
+
+            if (!response.ok) {
+              // Rollback on error
+              setMessages(previousMessages);
+              const errorData = await response
+                .json()
+                .catch(() => ({ message: "Unknown error" }));
+              throw new Error(
+                errorData.message ||
+                  `Failed to update message: ${response.status}`
+              );
+            }
+
+            setError(null);
+          } catch (error) {
+            console.error("Failed to update message:", error);
+            setError(`Failed to update message: ${error.message}`);
+          } finally {
+            setActionLoading((prev) => ({ ...prev, [id]: false }));
+          }
+        };
+
+        const deleteMessage = async (id) => {
+          const messageToDelete = messages.find(
+            (msg) => msg.id === id || msg._id === id
+          );
+
+          if (!messageToDelete) return;
+
+          // Optimistic update - remove immediately from UI
+          const previousMessages = [...messages];
+          setMessages((prev) =>
+            prev.filter((msg) => msg.id !== id && msg._id !== id)
+          );
+
+          // Store deleted message for undo
+          setDeletedMessage({
+            message: messageToDelete,
+            previousMessages,
+            id: id,
+          });
+          setShowUndo(true);
+
+          // Clear any existing timeout
+          if (undoTimeout) {
+            clearTimeout(undoTimeout);
+          }
+
+          // Set new timeout to hide undo after 5 seconds
+          const timeoutId = setTimeout(() => {
+            if (showUndo) {
+              setShowUndo(false);
+              setDeletedMessage(null);
+            }
+          }, 5000);
+
+          setUndoTimeout(timeoutId);
+
+          try {
+            const token = localStorage.getItem("cc_token");
+
+            const response = await fetch(`${API_BASE}/api/messages/${id}`, {
+              method: "DELETE",
+              headers: {
+                Authorization: `Bearer ${token}`,
+              },
+            });
+
+            if (response.ok) {
+              // Clear undo notification on successful deletion
+              setShowUndo(false);
+              setDeletedMessage(null);
+              if (undoTimeout) {
+                clearTimeout(undoTimeout);
+              }
+              setError(null);
+            } else {
+              const errorData = await response
+                .json()
+                .catch(() => ({ message: "Unknown error" }));
+              throw new Error(
+                errorData.message ||
+                  `Failed to delete message: ${response.status}`
+              );
+            }
+          } catch (error) {
+            console.error("Failed to delete message:", error);
+            setError(`Failed to delete message: ${error.message}`);
+
+            // Auto-rollback on error
+            setMessages(previousMessages);
+            setShowUndo(false);
+            setDeletedMessage(null);
+            if (undoTimeout) {
+              clearTimeout(undoTimeout);
+            }
+          }
+        };
+
+        const undoDelete = () => {
+          if (deletedMessage) {
+            // Restore the message
+            setMessages(deletedMessage.previousMessages);
+            setShowUndo(false);
+            setDeletedMessage(null);
+
+            // Clear the timeout
+            if (undoTimeout) {
+              clearTimeout(undoTimeout);
+              setUndoTimeout(null);
+            }
+          }
+        };
+
+        const dismissUndo = () => {
+          setShowUndo(false);
+          setDeletedMessage(null);
+          if (undoTimeout) {
+            clearTimeout(undoTimeout);
+            setUndoTimeout(null);
+          }
+        };
+
+        /* Sidebar navigation component */
+        const Sidebar = () => (
+          <div className="hidden md:flex md:w-64 md:flex-col md:fixed md:inset-y-0">
+            <div className="flex-1 flex flex-col min-h-0 bg-white border-r border-gray-200">
+              <div className="flex-1 flex flex-col pt-5 pb-4 overflow-y-auto">
+                <div className="flex items-center flex-shrink-0 px-4 mb-8">
+                  <div className="bg-primary rounded-lg p-2 mr-3">
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      className="h-6 w-6 text-white"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      stroke="currentColor"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M17 8h2a2 2 0 012 2v6a2 2 0 01-2 2h-2v4l-4-4H9a1.994 1.994 0 01-1.414-.586m0 0L11 14h4a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2v4l.586-.586z"
+                      />
+                    </svg>
+                  </div>
+                  <h1 className="text-xl font-bold text-gray-800">
+                    CampusConnect
+                  </h1>
+                </div>
+                <nav className="mt-5 flex-1 px-2 space-y-1">
+                  {[
+                    {
+                      id: "dashboard",
+                      icon: "fas fa-chart-line",
+                      label: "Dashboard",
+                    },
+                    {
+                      id: "feedback",
+                      icon: "fas fa-comments",
+                      label: "Feedback Management",
+                    },
+                    {
+                      id: "analytics",
+                      icon: "fas fa-chart-bar",
+                      label: "Analytics & Reports",
+                    },
+                    {
+                      id: "admins",
+                      icon: "fas fa-users-cog",
+                      label: "Admin Management",
+                    },
+                    { id: "settings", icon: "fas fa-cog", label: "Settings" },
+                  ].map((item) => (
+                    <button
+                      key={item.id}
+                      onClick={() => setCurrentView(item.id)}
+                      className={`group flex items-center px-2 py-3 text-sm font-medium rounded-md w-full transition-colors ${
+                        currentView === item.id
+                          ? "bg-primary text-gray-800"
+                          : "text-gray-600 hover:bg-gray-50 hover:text-gray-900"
+                      }`}
+                    >
+                      <i className={`${item.icon} mr-3 text-sm`}></i>
+                      {item.label}
+                    </button>
+                  ))}
+                </nav>
+              </div>
+              <div className="flex-shrink-0 flex border-t border-gray-200 p-4">
+                <button
+                  onClick={handleLogout}
+                  className="flex-shrink-0 w-full group block"
+                >
+                  <div className="flex items-center">
+                    <i className="fas fa-sign-out-alt text-gray-400 mr-3"></i>
+                    <div className="ml-3">
+                      <p className="text-sm font-medium text-gray-700 group-hover:text-gray-900">
+                        Sign out
+                      </p>
+                    </div>
+                  </div>
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+
+        /* Mobile tab bar navigation */
+        const MobileTabBar = () => (
+          <div className="md:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200">
+            <div className="flex justify-around py-2">
+              {[
+                {
+                  id: "dashboard",
+                  icon: "fas fa-chart-line",
+                  label: "Dashboard",
+                },
+                { id: "feedback", icon: "fas fa-comments", label: "Feedback" },
+                {
+                  id: "analytics",
+                  icon: "fas fa-chart-bar",
+                  label: "Analytics",
+                },
+                { id: "admins", icon: "fas fa-users-cog", label: "Admins" },
+                { id: "settings", icon: "fas fa-cog", label: "Settings" },
+              ].map((item) => (
+                <button
+                  key={item.id}
+                  onClick={() => setCurrentView(item.id)}
+                  className={`flex flex-col items-center py-1 px-2 rounded-lg transition-colors ${
+                    currentView === item.id ? "text-primary" : "text-gray-600"
+                  }`}
+                >
+                  <i className={`${item.icon} text-lg mb-1`}></i>
+                  <span className="text-xs">{item.label}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        );
+
+        /* Dashboard view component */
+        const DashboardView = () => (
+          <div className="space-y-6">
+            <div className="flex items-center justify-between">
+              <div>
+                <h1 className="text-2xl font-bold text-gray-900">
+                  Admin Dashboard
+                </h1>
+                <p className="text-gray-600">
+                  Welcome back. Here's a summary of student feedback.
+                </p>
+              </div>
+            </div>
+
+            {error && (
+              <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+                <div className="flex items-center">
+                  <i className="fas fa-exclamation-triangle text-red-500 mr-3"></i>
+                  <p className="text-red-700">{error}</p>
+                  <button
+                    onClick={() => setError(null)}
+                    className="ml-auto text-red-500 hover:text-red-700"
+                  >
+                    <i className="fas fa-times"></i>
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Stats Cards */}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+              <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-200">
+                <div className="flex items-center">
+                  <div className="w-12 h-12 bg-green-100 rounded-lg flex items-center justify-center mr-4">
+                    <i className="fas fa-comment text-green-600 text-xl"></i>
+                  </div>
+                  <div>
+                    <p className="text-sm text-gray-600">Total Feedback</p>
+                    <p className="text-2xl font-bold text-gray-900">
+                      {stats.totalMessages.toLocaleString()}
+                    </p>
+                    <p
+                      title={totalMonthDisplay.tooltip}
+                      onClick={() => {
+                        setAnalyticsFocus({
+                          metric: "totalFeedback",
+                          period: "month",
+                          comp: totalMonthComp,
+                        });
+                        setCurrentView("analytics");
+                      }}
+                      className={`cursor-pointer text-xs ${totalMonthDisplay.colorClass} flex items-center`}
+                    >
+                      <i className={`${totalMonthDisplay.icon} mr-1`}></i>
+                      {totalMonthDisplay.text}
+                      {totalMonthDisplay.text !== "—" ? " this month" : ""}
+                    </p>
+                    {totalMonthDisplay.tooltip && (
+                      <p className="text-xs text-gray-400 mt-1">
+                        {totalMonthDisplay.tooltip}
+                      </p>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-200">
+                <div className="flex items-center">
+                  <div className="w-12 h-12 bg-blue-100 rounded-lg flex items-center justify-center mr-4">
+                    <i className="fas fa-envelope text-blue-600 text-xl"></i>
+                  </div>
+                  <div>
+                    <p className="text-sm text-gray-600">Unread Feedback</p>
+                    <p className="text-2xl font-bold text-gray-900">
+                      {stats.unreadMessages}
+                    </p>
+                    <p
+                      title={unreadWeekDisplay.tooltip}
+                      onClick={() => {
+                        setAnalyticsFocus({
+                          metric: "unreadFeedback",
+                          period: "week",
+                          comp: unreadWeekComp,
+                        });
+                        setCurrentView("analytics");
+                      }}
+                      className={`cursor-pointer text-xs ${unreadWeekDisplay.colorClass} flex items-center`}
+                    >
+                      <i className={`${unreadWeekDisplay.icon} mr-1`}></i>
+                      {unreadWeekDisplay.text}
+                      {unreadWeekDisplay.text !== "—" ? " this week" : ""}
+                    </p>
+                    {unreadWeekDisplay.tooltip && (
+                      <p className="text-xs text-gray-400 mt-1">
+                        {unreadWeekDisplay.tooltip}
+                      </p>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-200">
+                <div className="flex items-center">
+                  <div className="w-12 h-12 bg-purple-100 rounded-lg flex items-center justify-center mr-4">
+                    <i className="fas fa-chart-line text-purple-600 text-xl"></i>
+                  </div>
+                  <div>
+                    <p className="text-sm text-gray-600">Response Rate</p>
+                    <p className="text-2xl font-bold text-gray-900">
+                      {stats.responseRate}%
+                    </p>
+                    <p className="text-xs text-gray-600">Overall rate</p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-200">
+                <div className="flex items-center">
+                  <div className="w-12 h-12 bg-orange-100 rounded-lg flex items-center justify-center mr-4">
+                    <i className="fas fa-clock text-orange-600 text-xl"></i>
+                  </div>
+                  <div>
+                    <p className="text-sm text-gray-600">Avg. Response Time</p>
+                    <p className="text-2xl font-bold text-gray-900">
+                      {stats.avgResponseTime !== null
+                        ? `${stats.avgResponseTime} days`
+                        : "—"}
+                    </p>
+                    <p
+                      title={avgRespWeekDisplay.tooltip}
+                      onClick={() => {
+                        setAnalyticsFocus({
+                          metric: "avgResponseTime",
+                          period: "week",
+                          comp: avgRespWeekComp,
+                        });
+                        setCurrentView("analytics");
+                      }}
+                      className={`cursor-pointer text-xs ${avgRespWeekDisplay.colorClass} flex items-center`}
+                    >
+                      <i className={`${avgRespWeekDisplay.icon} mr-1`}></i>
+                      {avgRespWeekDisplay.text}
+                      {avgRespWeekDisplay.text !== "—" ? " this week" : ""}
+                    </p>
+                    {avgRespWeekDisplay.tooltip && (
+                      <p className="text-xs text-gray-400 mt-1">
+                        {avgRespWeekDisplay.tooltip}
+                      </p>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Recent Activity & Quick Stats */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-200">
+                <h3 className="text-lg font-semibold text-gray-900 mb-4">
+                  Recent Feedback
+                </h3>
+                {loading ? (
+                  <div className="flex justify-center py-8">
+                    <div className="loading-spinner"></div>
+                  </div>
+                ) : (
+                  <div className="space-y-4 max-h-80 overflow-y-auto scrollbar-thin">
+                    {messages.slice(0, 5).map((message) => (
+                      <div
+                        key={message.id}
+                        className="flex items-start space-x-3 p-3 border border-gray-100 rounded-lg hover:bg-gray-50"
+                      >
+                        <div
+                          className={`w-2 h-2 mt-2 rounded-full ${
+                            message.status === "new"
+                              ? "bg-red-500"
+                              : message.status === "reviewed"
+                              ? "bg-yellow-500"
+                              : "bg-green-500"
+                          }`}
+                        ></div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-medium text-gray-900 truncate">
+                            {message.text}
+                          </p>
+                          <div className="flex items-center space-x-2 mt-1">
+                            <span
+                              className={`px-2 py-1 rounded-full text-xs ${getCategoryColor(
+                                message.category
+                              )}`}
+                            >
+                              {message.category}
+                            </span>
+                            <span className="text-xs text-gray-500">
+                              {formatDate(message.timestamp)}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                    {messages.length === 0 && (
+                      <p className="text-center text-gray-500 py-4">
+                        No feedback messages yet
+                      </p>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-200">
+                <h3 className="text-lg font-semibold text-gray-900 mb-4">
+                  Feedback by Category
+                </h3>
+                <div className="space-y-3">
+                  {(() => {
+                    const categoryKeys = {
+                      suggestion: "Suggestion",
+                      complaint: "Complaint",
+                      appreciation: "Appreciation",
+                      question: "Question",
+                    };
+                    const counts = {};
+                    Object.keys(categoryKeys).forEach((k) => (counts[k] = 0));
+                    messages.forEach((m) => {
+                      const key = (m.category || "").toString().toLowerCase();
+                      if (counts.hasOwnProperty(key)) counts[key] += 1;
+                    });
+                    return Object.keys(categoryKeys).map((k, index) => (
+                      <div
+                        key={k}
+                        className="flex items-center justify-between"
+                      >
+                        <div className="flex items-center space-x-3">
+                          <div
+                            className={`w-3 h-3 rounded-full ${
+                              k === "suggestion"
+                                ? "bg-blue-500"
+                                : k === "complaint"
+                                ? "bg-red-500"
+                                : k === "appreciation"
+                                ? "bg-green-500"
+                                : "bg-purple-500"
+                            }`}
+                          ></div>
+                          <span className="text-sm text-gray-700">
+                            {categoryKeys[k]}
+                          </span>
+                        </div>
+                        <span className="text-sm font-medium text-gray-900">
+                          {counts[k]}
+                        </span>
+                      </div>
+                    ));
+                  })()}
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+
+        /* Feedback management view component */
+        const FeedbackManagementView = () => {
+          const [filterStatus, setFilterStatus] = useState("all");
+          const [searchTerm, setSearchTerm] = useState("");
+
+          const filteredMessages = messages.filter((message) => {
+            const matchesStatus =
+              filterStatus === "all" ||
+              (message.status || "").toLowerCase() ===
+                filterStatus.toLowerCase();
+            const matchesSearch =
+              message.text.toLowerCase().includes(searchTerm.toLowerCase()) ||
+              (message.category || "")
+                .toLowerCase()
+                .includes(searchTerm.toLowerCase());
+            return matchesStatus && matchesSearch;
+          });
+
+          return (
+            <div className="space-y-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h1 className="text-2xl font-bold text-gray-900">
+                    Manage Feedback
+                  </h1>
+                  <p className="text-gray-600">
+                    Review and manage student feedback submissions
+                  </p>
+                </div>
+              </div>
+
+              {error && (
+                <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+                  <div className="flex items-center">
+                    <i className="fas fa-exclamation-triangle text-red-500 mr-3"></i>
+                    <p className="text-red-700">{error}</p>
+                    <button
+                      onClick={() => setError(null)}
+                      className="ml-auto text-red-500 hover:text-red-700"
+                    >
+                      <i className="fas fa-times"></i>
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* Filters and Search */}
+              <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-200">
+                <div className="flex flex-col md:flex-row md:items-center md:justify-between space-y-4 md:space-y-0">
+                  <div className="flex-1">
+                    <div className="relative">
+                      <i className="fas fa-search absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400"></i>
+                      <input
+                        type="text"
+                        placeholder="Search by keyword, ID, or category..."
+                        value={searchTerm}
+                        onChange={(e) => setSearchTerm(e.target.value)}
+                        className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-transparent"
+                      />
+                    </div>
+                  </div>
+                  <div className="flex space-x-4">
+                    <select
+                      value={filterStatus}
+                      onChange={(e) => setFilterStatus(e.target.value)}
+                      className="border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-primary focus:border-transparent"
+                    >
+                      <option value="all">All Status</option>
+                      <option value="new">New</option>
+                      <option value="reviewed">Reviewed</option>
+                      <option value="resolved">Resolved</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+
+              {/* Feedback Table */}
+              <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+                {loading ? (
+                  <div className="flex justify-center py-8">
+                    <div className="loading-spinner"></div>
+                  </div>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full mobile-optimized-table">
+                      <thead className="bg-gray-50">
+                        <tr>
+                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                            Feedback ID
+                          </th>
+                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                            Date
+                          </th>
+                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                            Type
+                          </th>
+                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                            Category
+                          </th>
+                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                            Feedback
+                          </th>
+                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                            Status
+                          </th>
+                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                            Actions
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody className="bg-white divide-y divide-gray-200">
+                        {filteredMessages.map((message) => (
+                          <tr key={message.id} className="hover:bg-gray-50">
+                            <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                              #{message.id}
+                            </td>
+                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                              {formatDate(message.timestamp)}
+                            </td>
+                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                              {message.type}
+                            </td>
+                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                              <span
+                                className={`px-2 py-1 rounded-full text-xs ${getCategoryColor(
+                                  message.category
+                                )}`}
+                              >
+                                {message.category}
+                              </span>
+                            </td>
+                            <td className="px-6 py-4 text-sm text-gray-500 max-w-xs truncate">
+                              {message.text}
+                            </td>
+                            <td className="px-6 py-4 whitespace-nowrap">
+                              <span
+                                className={`px-2 py-1 rounded-full text-xs font-medium ${getStatusColor(
+                                  message.status
+                                )}`}
+                              >
+                                {message.status}
+                              </span>
+                            </td>
+                            <td className="px-6 py-4 whitespace-nowrap text-sm font-medium space-x-2 mobile-action-buttons">
+                              <button
+                                onClick={() =>
+                                  updateMessageStatus(
+                                    message._id || message.id,
+                                    "reviewed"
+                                  )
+                                }
+                                disabled={
+                                  actionLoading[message._id || message.id]
+                                }
+                                className="text-blue-600 hover:text-blue-900 disabled:opacity-50"
+                                aria-label={`Mark message as reviewed`}
+                              >
+                                {actionLoading[message._id || message.id]
+                                  ? "Updating..."
+                                  : "Review"}
+                              </button>
+                              <button
+                                onClick={() =>
+                                  updateMessageStatus(
+                                    message._id || message.id,
+                                    "resolved"
+                                  )
+                                }
+                                disabled={
+                                  actionLoading[message._id || message.id]
+                                }
+                                className="text-green-600 hover:text-green-900 disabled:opacity-50"
+                                aria-label={`Mark message as resolved`}
+                              >
+                                {actionLoading[message._id || message.id]
+                                  ? "Updating..."
+                                  : "Resolve"}
+                              </button>
+                              <button
+                                onClick={() =>
+                                  deleteMessage(message._id || message.id)
+                                }
+                                className="text-red-600 hover:text-red-900"
+                                aria-label={`Delete message`}
+                              >
+                                Delete
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                    {filteredMessages.length === 0 && (
+                      <div className="text-center py-8">
+                        <i className="fas fa-inbox text-gray-400 text-4xl mb-3"></i>
+                        <p className="text-gray-500">
+                          No feedback messages found
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+          );
+        };
+
+        /* Analytics and reports view component */
+        const AnalyticsView = () => (
+          <div className="space-y-6">
+            {analyticsFocus && (
+              <div className="bg-white border-l-4 border-primary p-4 rounded-md">
+                <div className="flex items-start justify-between">
+                  <div>
+                    <p className="text-sm text-gray-700 font-medium">
+                      Quick Comparison
+                    </p>
+                    <p className="text-xs text-gray-500">
+                      Metric: {analyticsFocus.metric} • Period:{" "}
+                      {analyticsFocus.period}
+                    </p>
+                    <p className="text-sm text-gray-800 mt-2">
+                      Current:{" "}
+                      {analyticsFocus.comp &&
+                      analyticsFocus.comp.curr !== undefined
+                        ? analyticsFocus.comp.curr
+                        : "—"}{" "}
+                      • Previous:{" "}
+                      {analyticsFocus.comp &&
+                      analyticsFocus.comp.prev !== undefined
+                        ? analyticsFocus.comp.prev
+                        : "—"}
+                    </p>
+                  </div>
+                  <div>
+                    <button
+                      onClick={() => setAnalyticsFocus(null)}
+                      className="text-sm text-gray-500 underline"
+                    >
+                      Dismiss
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+            <div className="flex items-center justify-between">
+              <div>
+                <h1 className="text-2xl font-bold text-gray-900">
+                  Analytics & Reports
+                </h1>
+                <p className="text-gray-600">
+                  Comprehensive insights and reporting
+                </p>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+              {/* Quick Stats computed from messages */}
+              <div className="lg:col-span-2 grid grid-cols-1 md:grid-cols-3 gap-6">
+                <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-200 text-center">
+                  <p className="text-3xl font-bold text-gray-900">
+                    {stats.totalMessages.toLocaleString()}
+                  </p>
+                  <p className="text-sm text-gray-600">Total Feedback</p>
+                  <p className="text-xs text-gray-500 mt-1">Updated live</p>
+                </div>
+                <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-200 text-center">
+                  <p className="text-3xl font-bold text-gray-900">
+                    {computeSentimentPercent(messages)}%
+                  </p>
+                  <p className="text-sm text-gray-600">Positive Sentiment</p>
+                  <p className="text-xs text-gray-500 mt-1">
+                    Based on keyword analysis
+                  </p>
+                </div>
+                <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-200 text-center">
+                  <p className="text-3xl font-bold text-gray-900">
+                    {getTopCategory(messages) || "—"}
+                  </p>
+                  <p className="text-sm text-gray-600">Top Category</p>
+                  <p className="text-xs text-gray-500 mt-1">By message count</p>
+                </div>
+              </div>
+
+              {/* Report Generator */}
+              <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-200">
+                <h3 className="text-lg font-semibold text-gray-900 mb-4">
+                  Generate Report
+                </h3>
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Report Format
+                    </label>
+                    <select className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-primary focus:border-transparent">
+                      <option>PDF</option>
+                      <option>CSV</option>
+                      <option>Excel</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Data Range
+                    </label>
+                    <select className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-primary focus:border-transparent">
+                      <option>Last 7 days</option>
+                      <option>Last 30 days</option>
+                      <option>Last 90 days</option>
+                      <option>Custom range</option>
+                    </select>
+                  </div>
+                  <button className="w-full btn-primary py-2 rounded-lg font-semibold">
+                    <i className="fas fa-download mr-2"></i>
+                    Download Report
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {/* Charts Placeholder */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-200">
+                <h3 className="text-lg font-semibold text-gray-900 mb-4">
+                  Submissions Over Time
+                </h3>
+                <div className="h-64 bg-gray-100 rounded-lg flex items-center justify-center">
+                  <p className="text-gray-500">Chart: Submissions timeline</p>
+                </div>
+              </div>
+              <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-200">
+                <h3 className="text-lg font-semibold text-gray-900 mb-4">
+                  Feedback by Category
+                </h3>
+                <div className="h-64 bg-gray-100 rounded-lg flex items-center justify-center">
+                  <p className="text-gray-500">Chart: Category distribution</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+
+        /* Admin management view component */
+        const AdminManagementView = () => {
+          const [admins, setAdmins] = useState([]);
+          const [showAddForm, setShowAddForm] = useState(false);
+          const [newAdmin, setNewAdmin] = useState({
+            email: "",
+            password: "",
+            role: "admin",
+          });
+          const [loading, setLoading] = useState(false);
+
+          /* Fetch admins from API */
+          const fetchAdmins = async () => {
+            try {
+              const token = localStorage.getItem("cc_token");
+              const response = await fetch(`${API_BASE}/api/admin/admins`, {
+                headers: {
+                  Authorization: `Bearer ${token}`,
+                },
+              });
+
+              if (response.ok) {
+                const adminsData = await response.json();
+                setAdmins(adminsData);
+              }
+            } catch (error) {
+              console.error("Failed to fetch admins:", error);
+              setError("Failed to load admins");
+            }
+          };
+
+          /* Load admins on component mount */
+          useEffect(() => {
+            fetchAdmins();
+          }, []);
+
+          /* Create new admin */
+          const handleCreateAdmin = async () => {
+            if (!newAdmin.email || !newAdmin.password) {
+              setError("Email and password are required");
+              return;
+            }
+
+            setLoading(true);
+            try {
+              const token = localStorage.getItem("cc_token");
+              const response = await fetch(`${API_BASE}/api/admin/admins`, {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json",
+                  Authorization: `Bearer ${token}`,
+                },
+                body: JSON.stringify(newAdmin),
+              });
+
+              if (response.ok) {
+                const createdAdmin = await response.json();
+                setAdmins((prev) => [...prev, createdAdmin]);
+                setNewAdmin({ email: "", password: "", role: "admin" });
+                setShowAddForm(false);
+                setError(null);
+              } else {
+                const errorData = await response.json();
+                throw new Error(errorData.message || "Failed to create admin");
+              }
+            } catch (error) {
+              console.error("Failed to create admin:", error);
+              setError(error.message);
+            } finally {
+              setLoading(false);
+            }
+          };
+
+          /* Delete admin */
+          const handleDeleteAdmin = async (id) => {
+            if (
+              !window.confirm("Are you sure you want to delete this admin?")
+            ) {
+              return;
+            }
+
+            try {
+              const token = localStorage.getItem("cc_token");
+              const response = await fetch(
+                `${API_BASE}/api/admin/admins/${id}`,
+                {
+                  method: "DELETE",
+                  headers: {
+                    Authorization: `Bearer ${token}`,
+                  },
+                }
+              );
+
+              if (response.ok) {
+                setAdmins((prev) => prev.filter((admin) => admin._id !== id));
+              } else {
+                throw new Error("Failed to delete admin");
+              }
+            } catch (error) {
+              console.error("Failed to delete admin:", error);
+              setError("Failed to delete admin");
+            }
+          };
+
+          return (
+            <div className="space-y-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h1 className="text-2xl font-bold text-gray-900">
+                    Administrator Management
+                  </h1>
+                  <p className="text-gray-600">
+                    Add, edit, or remove administrator accounts
+                  </p>
+                </div>
+                <button
+                  onClick={() => setShowAddForm(true)}
+                  className="btn-primary px-4 py-2 rounded-lg font-semibold"
+                >
+                  <i className="fas fa-plus mr-2"></i>
+                  Add Admin
+                </button>
+              </div>
+
+              {/* Add Admin Form Modal */}
+              {showAddForm && (
+                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+                  <div className="bg-white rounded-xl p-6 w-full max-w-md">
+                    <h3 className="text-lg font-semibold text-gray-900 mb-4">
+                      Add New Admin
+                    </h3>
+
+                    <div className="space-y-4">
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          Email Address
+                        </label>
+                        <input
+                          type="email"
+                          value={newAdmin.email}
+                          onChange={(e) =>
+                            setNewAdmin((prev) => ({
+                              ...prev,
+                              email: e.target.value,
+                            }))
+                          }
+                          className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-primary focus:border-transparent"
+                          placeholder="admin@campusconnect.edu"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          Password
+                        </label>
+                        <input
+                          type="password"
+                          value={newAdmin.password}
+                          onChange={(e) =>
+                            setNewAdmin((prev) => ({
+                              ...prev,
+                              password: e.target.value,
+                            }))
+                          }
+                          className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-primary focus:border-transparent"
+                          placeholder="Enter password"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          Role
+                        </label>
+                        <select
+                          value={newAdmin.role}
+                          onChange={(e) =>
+                            setNewAdmin((prev) => ({
+                              ...prev,
+                              role: e.target.value,
+                            }))
+                          }
+                          className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-primary focus:border-transparent"
+                        >
+                          <option value="admin">Admin</option>
+                          <option value="superadmin">Super Admin</option>
+                        </select>
+                      </div>
+                    </div>
+
+                    <div className="flex justify-end space-x-3 mt-6">
+                      <button
+                        onClick={() => setShowAddForm(false)}
+                        className="px-4 py-2 text-gray-600 hover:text-gray-800"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        onClick={handleCreateAdmin}
+                        disabled={loading}
+                        className="btn-primary px-4 py-2 rounded-lg font-semibold disabled:opacity-50"
+                      >
+                        {loading ? (
+                          <>
+                            <div className="loading-spinner h-4 w-4 mr-2"></div>
+                            Creating...
+                          </>
+                        ) : (
+                          "Create Admin"
+                        )}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Search */}
+              <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-200">
+                <div className="relative">
+                  <i className="fas fa-search absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400"></i>
+                  <input
+                    type="text"
+                    placeholder="Search by email"
+                    className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-transparent"
+                  />
+                </div>
+              </div>
+
+              {/* Admins Table */}
+              <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+                <div className="overflow-x-auto">
+                  <table className="w-full">
+                    <thead className="bg-gray-50">
+                      <tr>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          Email Address
+                        </th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          Role
+                        </th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          Date Added
+                        </th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          Status
+                        </th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          Actions
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody className="bg-white divide-y divide-gray-200">
+                      {admins.map((admin) => (
+                        <tr key={admin._id} className="hover:bg-gray-50">
+                          <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                            {admin.email}
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                            <span
+                              className={`px-2 py-1 rounded-full text-xs ${
+                                admin.role === "superadmin"
+                                  ? "bg-purple-100 text-purple-800"
+                                  : "bg-blue-100 text-blue-800"
+                              }`}
+                            >
+                              {admin.role}
+                            </span>
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                            {admin.createdAt
+                              ? formatDate(admin.createdAt)
+                              : "N/A"}
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap">
+                            <span
+                              className={`px-2 py-1 rounded-full text-xs font-medium ${"bg-green-100 text-green-800"}`}
+                            >
+                              Active
+                            </span>
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm font-medium space-x-2">
+                            <button className="text-blue-600 hover:text-blue-900">
+                              Edit
+                            </button>
+                            <button
+                              onClick={() => handleDeleteAdmin(admin._id)}
+                              className="text-red-600 hover:text-red-900"
+                            >
+                              Remove
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+
+                  {admins.length === 0 && (
+                    <div className="text-center py-8">
+                      <i className="fas fa-users text-gray-400 text-4xl mb-3"></i>
+                      <p className="text-gray-500">No admins found</p>
+                      <button
+                        onClick={() => setShowAddForm(true)}
+                        className="btn-primary px-4 py-2 rounded-lg font-semibold mt-4"
+                      >
+                        <i className="fas fa-plus mr-2"></i>
+                        Add First Admin
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          );
+        };
+
+        /* Settings and profile view component */
+        const SettingsView = () => (
+          <div className="space-y-6">
+            <div>
+              <h1 className="text-2xl font-bold text-gray-900">
+                Admin Settings
+              </h1>
+              <p className="text-gray-600">
+                Manage your account preferences and system settings
+              </p>
+            </div>
+
+            <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-200">
+              <h3 className="text-lg font-semibold text-gray-900 mb-4">
+                Profile Settings
+              </h3>
+              <div className="space-y-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Name
+                    </label>
+                    <input
+                      type="text"
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-primary focus:border-transparent"
+                      placeholder="Admin Name"
+                      defaultValue={user?.name || "Admin"}
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Email
+                    </label>
+                    <input
+                      type="email"
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-primary focus:border-transparent"
+                      placeholder="admin@campusconnect.edu"
+                      defaultValue={user?.email || "admin@campusconnect.edu"}
+                    />
+                  </div>
+                </div>
+                <button className="btn-primary px-4 py-2 rounded-lg font-semibold">
+                  Update Profile
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+
+        /* Main render */
+        return (
+          <div className="h-screen flex overflow-hidden bg-gray-50">
+            <Sidebar />
+
+            {/* Main content */}
+            <div className="flex flex-col w-0 flex-1 overflow-hidden md:ml-64">
+              <main className="flex-1 relative overflow-y-auto focus:outline-none pb-20 md:pb-0">
+                <div className="py-6 px-4 sm:px-6 lg:px-8">
+                  {currentView === "dashboard" && <DashboardView />}
+                  {currentView === "feedback" && <FeedbackManagementView />}
+                  {currentView === "analytics" && <AnalyticsView />}
+                  {currentView === "admins" && <AdminManagementView />}
+                  {currentView === "settings" && <SettingsView />}
+                </div>
+              </main>
+            </div>
+
+            <MobileTabBar />
+
+            {/* Undo Notification */}
+            {showUndo && (
+              <div className="fixed bottom-4 right-4 bg-gray-800 text-white px-4 py-3 rounded-lg shadow-lg flex items-center space-x-4 z-50">
+                <div className="flex items-center space-x-3">
+                  <i className="fas fa-trash-restore text-primary"></i>
+                  <span>Message deleted</span>
+                </div>
+                <button
+                  onClick={undoDelete}
+                  className="text-primary hover:text-primary-dark font-semibold px-2 py-1 rounded hover:bg-gray-700 transition-colors"
+                >
+                  Undo
+                </button>
+                <button
+                  onClick={dismissUndo}
+                  className="text-gray-400 hover:text-white p-1 rounded-full hover:bg-gray-700 transition-colors"
+                  aria-label="Dismiss"
+                >
+                  <i className="fas fa-times"></i>
+                </button>
+              </div>
+            )}
+          </div>
+        );
+      };
+
+      // Render the app
+      ReactDOM.render(<AdminDashboard />, document.getElementById("root"));
+    </script>
+  </body>
+</html>

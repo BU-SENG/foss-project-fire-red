@@ -1,0 +1,629 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CampusConnect - Public Wall</title>
+    <link rel="icon" href="./assets/cc-logo.png" type="image/png">
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- React CDNs -->
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <!-- Babel for JSX transformation -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <style>
+        /* Scrollbar styling */
+        .message-feed::-webkit-scrollbar {
+            width: 6px;
+        }
+
+        .message-feed::-webkit-scrollbar-track {
+            background: #f1f1f1;
+            border-radius: 10px;
+        }
+
+        .message-feed::-webkit-scrollbar-thumb {
+            background: #c1c1c1;
+            border-radius: 10px;
+        }
+
+        .message-feed::-webkit-scrollbar-thumb:hover {
+            background: #a8a8a8;
+        }
+
+        /* Animations */
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+                transform: translateY(10px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .message-card {
+            animation: fadeIn 0.5s ease-out;
+        }
+
+        /* Color palette */
+        :root {
+            --primary-color: #a7c957;
+            --primary-dark: #95b44a;
+            --secondary-color: #a3b18a;
+            --background-color: #d8f3dc;
+            --white: #ffffff;
+        }
+
+        .bg-primary {
+            background-color: var(--primary-color);
+        }
+
+        .bg-primary-dark {
+            background-color: var(--primary-dark);
+        }
+
+        .bg-secondary {
+            background-color: var(--secondary-color);
+        }
+
+        .bg-background {
+            background-color: var(--background-color);
+        }
+
+        .text-primary {
+            color: var(--primary-color);
+        }
+
+        .text-secondary {
+            color: var(--secondary-color);
+        }
+
+        .border-primary {
+            border-color: var(--primary-color);
+        }
+
+        .border-secondary {
+            border-color: var(--secondary-color);
+        }
+
+        .hover\:bg-primary-dark:hover {
+            background-color: var(--primary-dark);
+        }
+
+        .bg-gradient-subtle {
+            background: linear-gradient(135deg, var(--background-color), var(--white));
+        }
+
+        /* Card styling */
+        .message-card {
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
+        }
+
+        .message-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(163, 177, 138, 0.15);
+        }
+
+        /* Buttons */
+        .btn-primary {
+            padding: 0.625rem 1.5rem;
+            border-radius: 0.5rem;
+            font-weight: 500;
+            color: #2d3748;
+            transition: all 0.2s ease;
+            background-color: var(--primary-color);
+            box-shadow: 0 2px 4px rgba(167, 201, 87, 0.3);
+        }
+
+        .btn-primary:hover {
+            background-color: var(--primary-dark);
+            transform: translateY(-1px);
+            box-shadow: 0 4px 8px rgba(167, 201, 87, 0.4);
+        }
+
+        .btn-primary:active {
+            transform: translateY(0);
+        }
+
+        /* Message cards */
+        .message-card {
+            background: var(--white);
+            border: 1px solid rgba(163, 177, 138, 0.3);
+            box-shadow: 0 2px 8px rgba(163, 177, 138, 0.1);
+        }
+
+        .message-card:hover {
+            border-color: var(--primary-color);
+        }
+
+        /* Category badges */
+        .category-suggestion {
+            background-color: rgba(167, 201, 87, 0.15);
+            color: #2d3748;
+            border: 1px solid rgba(167, 201, 87, 0.3);
+        }
+
+        .category-complaint {
+            background-color: rgba(239, 68, 68, 0.15);
+            color: #2d3748;
+            border: 1px solid rgba(239, 68, 68, 0.3);
+        }
+
+        .category-appreciation {
+            background-color: rgba(16, 185, 129, 0.15);
+            color: #2d3748;
+            border: 1px solid rgba(16, 185, 129, 0.3);
+        }
+
+        .category-question {
+            background-color: rgba(139, 92, 246, 0.15);
+            color: #2d3748;
+            border: 1px solid rgba(139, 92, 246, 0.3);
+        }
+
+        .loading-spinner {
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid var(--primary-color);
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+
+<body class="min-h-screen">
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useRef } = React;
+        const API_BASE = 'https://campusconnect-server-idcq.onrender.com';
+
+        function App() {
+            const categories = [
+                { id: 'suggestion', label: 'Suggestion', icon: '💡', color: 'category-suggestion' },
+                { id: 'complaint', label: 'Complaint', icon: '⚠️', color: 'category-complaint' },
+                { id: 'appreciation', label: 'Appreciation', icon: '❤️', color: 'category-appreciation' },
+                { id: 'question', label: 'Question', icon: '❓', color: 'category-question' }
+            ];
+
+            const [messages, setMessages] = useState([]);
+            const [loadingMessages, setLoadingMessages] = useState(false);
+            const [selectedCategory, setSelectedCategory] = useState('all');
+            const [newMessage, setNewMessage] = useState('');
+            const [isPosting, setIsPosting] = useState(false);
+            const messagesEndRef = useRef(null);
+
+            /* Fetch messages from API - Compatible with Admin Dashboard */
+            useEffect(() => {
+                let cancelled = false;
+
+                async function loadMessages() {
+                    setLoadingMessages(true);
+                    try {
+                        const res = await fetch(`${API_BASE}/api/messages`);
+                        if (!res.ok) throw new Error('Failed to fetch messages');
+
+                        const data = await res.json();
+                        
+                        // Handle both array response and object with messages property
+                        const messagesFromBackend = Array.isArray(data) ? data : (data.messages || []);
+                        
+                        const normalized = messagesFromBackend.map(m => {
+                            // Extract the actual message data (handles both direct and nested newMessage)
+                            const messageData = m.newMessage || m;
+                            
+                            return {
+                                id: messageData._id || m._id || m.id,
+                                text: messageData.text || m.text || '',
+                                category: messageData.category || m.category || 'suggestion',
+                                timestamp: new Date(messageData.createdAt || m.createdAt || m.timestamp || Date.now()),
+                                likes: messageData.likes ?? m.likes ?? 0,
+                                status: messageData.status || m.status || 'new', // Added status for admin compatibility
+                                type: 'public' // Added type to distinguish message source
+                            };
+                        });
+
+                        if (!cancelled) setMessages(normalized);
+
+                    } catch (err) {
+                        console.error('Error loading messages:', err);
+                        if (!cancelled) setMessages([]);
+                    } finally {
+                        if (!cancelled) setLoadingMessages(false);
+                    }
+                }
+
+                loadMessages();
+                return () => { cancelled = true; };
+            }, []);
+
+            /* Handle posting a new message - Compatible with Admin Dashboard */
+            const handlePostMessage = async () => {
+                if (newMessage.trim() === '' || selectedCategory === 'all') return;
+
+                const validationError = validateMessage(newMessage);
+                if (validationError) {
+                    alert(validationError);
+                    return;
+                }
+
+                setIsPosting(true);
+
+                try {
+                    const res = await fetch(`${API_BASE}/api/messages`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ 
+                            text: newMessage.trim(), 
+                            category: selectedCategory,
+                            status: 'new', // Ensure status is set for admin
+                            type: 'public' // Identify as public wall message
+                        })
+                    });
+
+                    if (!res.ok) {
+                        const errorData = await res.json().catch(() => ({ error: 'Failed to post message' }));
+                        throw new Error(errorData.error || `HTTP ${res.status}: ${res.statusText}`);
+                    }
+
+                    const created = await res.json();
+
+                    // Normalize response for both frontend and admin dashboard compatibility
+                    const normalized = {
+                        id: created._id || created.newMessage?._id || created.id || Date.now().toString(),
+                        text: created.text || created.newMessage?.text || newMessage,
+                        category: created.category || created.newMessage?.category || selectedCategory,
+                        timestamp: new Date(created.createdAt || created.newMessage?.createdAt || Date.now()),
+                        likes: created.likes ?? created.newMessage?.likes ?? 0,
+                        status: created.status || created.newMessage?.status || 'new',
+                        type: 'public'
+                    };
+
+                    setMessages(prev => [normalized, ...prev]);
+                    setNewMessage('');
+                    setSelectedCategory('all');
+
+                    // Scroll to top to see new message
+                    if (messagesEndRef.current) {
+                        messagesEndRef.current.scrollIntoView({ behavior: 'smooth' });
+                    }
+
+                } catch (err) {
+                    console.error('Post message error:', err);
+                    alert('Could not post message: ' + (err.message || 'Please try again later'));
+                } finally {
+                    setIsPosting(false);
+                }
+            };
+
+            /* Handle liking a message */
+            const handleLikeMessage = async (id) => {
+                const originalLikes = messages.find(m => m.id === id)?.likes || 0;
+                
+                // Optimistic update
+                setMessages(prev => prev.map(m => 
+                    m.id === id ? { ...m, likes: m.likes + 1 } : m
+                ));
+
+                try {
+                    const res = await fetch(`${API_BASE}/api/messages/${id}/like`, { 
+                        method: 'POST' 
+                    });
+                    
+                    if (!res.ok) throw new Error('Failed to like');
+                    
+                    const updated = await res.json();
+                    // Sync with server
+                    setMessages(prev => prev.map(m => 
+                        m.id === (updated._id || updated.id) ? { ...m, likes: updated.likes } : m
+                    ));
+                    
+                } catch (err) {
+                    console.error('Like error:', err);
+                    // Revert optimistic update on error
+                    setMessages(prev => prev.map(m => 
+                        m.id === id ? { ...m, likes: originalLikes } : m
+                    ));
+                }
+            };
+
+            /* Input validation */
+            const validateMessage = (text) => {
+                if (text.trim().length === 0) {
+                    return 'Message cannot be empty';
+                }
+                if (text.trim().length < 5) {
+                    return 'Message is too short (minimum 5 characters)';
+                }
+                if (text.length > 500) {
+                    return 'Message is too long (maximum 500 characters)';
+                }
+                return null;
+            };
+
+            /* Format timestamp to relative time display */
+            const formatTime = (timestamp) => {
+                const now = new Date();
+                const diffMs = now - timestamp;
+                const diffMins = Math.floor(diffMs / 60000);
+                const diffHrs = Math.floor(diffMins / 60);
+                const diffDays = Math.floor(diffHrs / 24);
+
+                if (diffMins < 1) return 'Just now';
+                if (diffMins < 60) return `${diffMins} minute${diffMins > 1 ? 's' : ''} ago`;
+                if (diffHrs < 24) return `${diffHrs} hour${diffHrs > 1 ? 's' : ''} ago`;
+                return `${diffDays} day${diffDays > 1 ? 's' : ''} ago`;
+            };
+
+            /* Auto-refresh messages every 30 seconds */
+            useEffect(() => {
+                if (loadingMessages) return;
+                
+                const interval = setInterval(async () => {
+                    try {
+                        const res = await fetch(`${API_BASE}/api/messages`);
+                        if (res.ok) {
+                            const data = await res.json();
+                            const messagesFromBackend = Array.isArray(data) ? data : (data.messages || []);
+                            
+                            if (messagesFromBackend.length !== messages.length) {
+                                const normalized = messagesFromBackend.map(m => {
+                                    const messageData = m.newMessage || m;
+                                    return {
+                                        id: messageData._id || m._id || m.id,
+                                        text: messageData.text || m.text || '',
+                                        category: messageData.category || m.category || 'suggestion',
+                                        timestamp: new Date(messageData.createdAt || m.createdAt || m.timestamp || Date.now()),
+                                        likes: messageData.likes ?? m.likes ?? 0,
+                                        status: messageData.status || m.status || 'new',
+                                        type: 'public'
+                                    };
+                                });
+                                setMessages(normalized);
+                            }
+                        }
+                    } catch (err) {
+                        console.log('Auto-refresh failed:', err);
+                    }
+                }, 30000);
+
+                return () => clearInterval(interval);
+            }, [messages.length, loadingMessages]);
+
+            return (
+                <div className="min-h-screen bg-gradient-subtle">
+                    {/* Header */}
+                    <header className="bg-primary text-gray-800 shadow-md sticky top-0 z-50">
+                        <div className="container mx-auto px-4 py-4">
+                            <div className="flex justify-between items-center">
+                                <div className="flex items-center gap-3">
+                                    <div className="bg-white/30 rounded-lg p-2">
+                                        <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 8h2a2 2 0 012 2v6a2 2 0 01-2 2h-2v4l-4-4H9a1.994 1.994 0 01-1.414-.586m0 0L11 14h4a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2v4l.586-.586z" />
+                                        </svg>
+                                    </div>
+                                    <h1 className="text-xl font-bold">CampusConnect</h1>
+                                </div>
+                                <nav>
+                                    <a href="admin-login.html" className="flex items-center gap-2 text-gray-800 hover:text-gray-700 transition-colors px-3 py-2 rounded-lg hover:bg-white/20">
+                                        <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                                            <path fillRule="evenodd" d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z" clipRule="evenodd" />
+                                        </svg>
+                                        <span className="hidden sm:inline">Admin Login</span>
+                                    </a>
+                                </nav>
+                            </div>
+                        </div>
+                    </header>
+
+                    {/* Main Content */}
+                    <main className="container mx-auto px-4 py-8">
+                        <div className="max-w-4xl mx-auto">
+                            {/* Welcome Section */}
+                            <section className="mb-12 text-center">
+                                <h2 className="text-3xl font-bold text-gray-800 mb-4">Student Feedback Wall</h2>
+                                <p className="text-gray-600 max-w-2xl mx-auto">
+                                    Share your thoughts anonymously and help shape the future of our campus community.
+                                    Your voice matters!
+                                </p>
+                            </section>
+
+                            {/* Post Message Form */}
+                            <section className="bg-white rounded-xl shadow-lg p-6 mb-12 border border-secondary">
+                                <h3 className="text-xl font-semibold text-gray-800 mb-6 flex items-center gap-3">
+                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 text-primary" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                                    </svg>
+                                    <span>Share Your Thoughts</span>
+                                </h3>
+                                <div className="space-y-6">
+                                    <div>
+                                        <label className="block text-sm font-medium text-gray-700 mb-2">Select Category</label>
+                                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                                            {categories.map(cat => (
+                                                <button
+                                                    key={cat.id}
+                                                    onClick={() => setSelectedCategory(cat.id)}
+                                                    className={`p-3 rounded-lg transition-all duration-200 flex flex-col items-center justify-center gap-2 text-sm font-medium
+                                                        ${selectedCategory === cat.id
+                                                            ? `${cat.color} border-2 border-primary`
+                                                            : 'border border-secondary hover:border-primary hover:bg-background'
+                                                        }`}
+                                                >
+                                                    <span className="text-lg">{cat.icon}</span>
+                                                    <span>{cat.label}</span>
+                                                </button>
+                                            ))}
+                                        </div>
+                                    </div>
+                                    <div className="relative">
+                                        <textarea
+                                            className="w-full h-40 p-4 border border-secondary rounded-xl focus:ring-2 focus:ring-primary focus:border-transparent resize-none transition-all duration-200 bg-background/30"
+                                            placeholder="What's on your mind? Share your feedback, suggestions, or concerns..."
+                                            value={newMessage}
+                                            onChange={(e) => setNewMessage(e.target.value)}
+                                            disabled={isPosting}
+                                            maxLength={500}
+                                        ></textarea>
+                                        <div className="absolute bottom-3 right-3 text-sm text-gray-500 bg-white/80 px-2 py-1 rounded">
+                                            {newMessage.length}/500
+                                        </div>
+                                    </div>
+                                    <div className="flex justify-end">
+                                        <button
+                                            className={`btn-primary flex items-center gap-2
+                                                ${isPosting || newMessage.trim() === '' || selectedCategory === 'all' ? 'opacity-50 cursor-not-allowed' : ''}`}
+                                            onClick={handlePostMessage}
+                                            disabled={isPosting || newMessage.trim() === '' || selectedCategory === 'all'}
+                                        >
+                                            {isPosting ? (
+                                                <>
+                                                    <div className="loading-spinner h-5 w-5"></div>
+                                                    <span>Posting...</span>
+                                                </>
+                                            ) : (
+                                                <>
+                                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                                                        <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-8.707l-3-3a1 1 0 00-1.414 0l-3 3a1 1 0 001.414 1.414L9 9.414V13a1 1 0 102 0V9.414l1.293 1.293a1 1 0 001.414-1.414z" clipRule="evenodd" />
+                                                    </svg>
+                                                    <span>Post Anonymously</span>
+                                                </>
+                                            )}
+                                        </button>
+                                    </div>
+                                </div>
+                            </section>
+
+                            {/* Messages Feed */}
+                            <section className="bg-white rounded-xl shadow-lg overflow-hidden border border-secondary">
+                                <div className="p-6 border-b border-secondary">
+                                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                                        <h3 className="text-xl font-semibold text-gray-800 flex items-center gap-3">
+                                            <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 text-primary" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 8h2a2 2 0 012 2v6a2 2 0 01-2 2h-2v4l-4-4H9a1.994 1.994 0 01-1.414-.586m0 0L11 14h4a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2v4l.586-.586z" />
+                                            </svg>
+                                            Recent Messages
+                                        </h3>
+                                        <div className="flex gap-2 overflow-x-auto pb-2">
+                                            <button
+                                                onClick={() => setSelectedCategory('all')}
+                                                className={`px-4 py-2 rounded-lg transition-all duration-200 text-sm font-medium flex-shrink-0 whitespace-nowrap
+                                                    ${selectedCategory === 'all'
+                                                        ? 'bg-primary text-gray-800'
+                                                        : 'bg-background text-gray-700 hover:bg-secondary/20'}`}
+                                            >
+                                                All
+                                            </button>
+                                            {categories.map(cat => (
+                                                <button
+                                                    key={cat.id}
+                                                    onClick={() => setSelectedCategory(cat.id)}
+                                                    className={`px-4 py-2 rounded-lg transition-all duration-200 text-sm font-medium flex items-center gap-2 flex-shrink-0 whitespace-nowrap
+                                                        ${selectedCategory === cat.id
+                                                            ? `${cat.color}`
+                                                            : 'bg-background text-gray-700 hover:bg-secondary/20'}`}
+                                                >
+                                                    <span>{cat.icon}</span>
+                                                    <span>{cat.label}</span>
+                                                </button>
+                                            ))}
+                                        </div>
+                                    </div>
+                                </div>
+                                <div className="message-feed max-h-[600px] overflow-y-auto p-6">
+                                    {loadingMessages ? (
+                                        <div className="text-center py-12">
+                                            <div className="loading-spinner mx-auto mb-4"></div>
+                                            <p className="text-gray-500">Loading messages...</p>
+                                        </div>
+                                    ) : messages.filter(msg => selectedCategory === 'all' || msg.category === selectedCategory).length === 0 ? (
+                                        <div className="text-center py-12 text-gray-500">
+                                            <svg xmlns="http://www.w3.org/2000/svg" className="h-16 w-16 mx-auto mb-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+                                            </svg>
+                                            <p className="text-lg">No messages yet. Be the first to share your thoughts!</p>
+                                        </div>
+                                    ) : (
+                                        <div className="space-y-6">
+                                            {messages
+                                                .filter(msg => selectedCategory === 'all' || msg.category === selectedCategory)
+                                                .map(message => (
+                                                    <div key={message.id} className="message-card rounded-xl p-6">
+                                                        <div className="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-3 mb-4">
+                                                            <div className="flex flex-wrap items-center gap-2">
+                                                                <span className="text-sm text-gray-500 flex items-center gap-1">
+                                                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                                                    </svg>
+                                                                    {formatTime(message.timestamp)}
+                                                                </span>
+                                                                <span className={`px-3 py-1 rounded-full text-sm flex items-center gap-1
+                                                                ${categories.find(c => c.id === message.category)?.color}`}>
+                                                                    {categories.find(c => c.id === message.category)?.icon}
+                                                                    <span>{categories.find(c => c.id === message.category)?.label}</span>
+                                                                </span>
+                                                            </div>
+                                                            <button
+                                                                onClick={() => handleLikeMessage(message.id)}
+                                                                className="flex items-center gap-2 text-gray-500 hover:text-primary transition-colors px-3 py-1 rounded-full hover:bg-background text-sm font-medium"
+                                                                aria-label={`Like this message. Currently has ${message.likes} likes`}
+                                                            >
+                                                                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                                                                    <path d="M2 10.5a1.5 1.5 0 113 0v6a1.5 1.5 0 01-3 0v-6zM6 10.333v5.43a2 2 0 001.106 1.79l.05.025A4 4 0 008.943 18h5.416a2 2 0 001.962-1.608l1.2-6A2 2 0 0015.56 8H12V4a2 2 0 00-2-2 1 1 0 00-1 1v.667a4 4 0 01-.8 2.4L6.8 7.933a4 4 0 00-.8 2.4z" />
+                                                                </svg>
+                                                                <span>{message.likes}</span>
+                                                            </button>
+                                                        </div>
+                                                        <p className="text-gray-800 break-words">{message.text}</p>
+                                                    </div>
+                                                ))}
+                                            <div ref={messagesEndRef} />
+                                        </div>
+                                    )}
+                                </div>
+                            </section>
+                        </div>
+                    </main>
+
+                    {/* Footer */}
+                    <footer className="bg-primary text-gray-800 py-8 mt-16">
+                        <div className="container mx-auto px-4">
+                            <div className="flex flex-col md:flex-row justify-between items-center gap-4">
+                                <div className="flex items-center gap-2">
+                                    <div className="bg-white/30 rounded-lg p-2">
+                                        <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 8h2a2 2 0 012 2v6a2 2 0 01-2 2h-2v4l-4-4H9a1.994 1.994 0 01-1.414-.586m0 0L11 14h4a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2v4l.586-.586z" />
+                                        </svg>
+                                    </div>
+                                    <span className="font-bold">CampusConnect</span>
+                                </div>
+                                <div className="text-center">
+                                    <p className="text-sm">Your Voice, Our Community</p>
+                                    <p className="text-xs text-gray-700 mt-1">Making our campus better together</p>
+                                </div>
+                                <div className="text-right">
+                                    <p className="text-sm">©️ {new Date().getFullYear()} CampusConnect</p>
+                                    <p className="text-xs text-gray-700">All rights reserved.</p>
+                                </div>
+                            </div>
+                        </div>
+                    </footer>
+                </div>
+            );
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
