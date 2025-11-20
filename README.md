@@ -11,7 +11,7 @@ A student feedback management system with admin dashboard.
 
 ## Admin Dashboard
 
-The admin dashboard is located in frontend/admin-dashboard/ and provides:
+The admin dashboard is located in frontend/admin-dashboard/ and provides the following functionalities which are:
 - Real-time feedback management
 - Analytics and reporting
 - Admin user management
