@@ -17,3 +17,7 @@ The admin dashboard is located in frontend/admin-dashboard/ and provides:
 - Admin user management
 - Mobile-responsive design
 
+## Figma File
+ Link to figma file:
+ https://www.figma.com/design/aBz7gJkeLe6q60Rc0AsC9g/Campus-Connect?node-id=0-1&m=dev
+ 
